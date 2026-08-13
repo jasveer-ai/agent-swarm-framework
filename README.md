@@ -1,87 +1,70 @@
-# 🌀 Agent Swarm Framework (ASF)
+# Agent Swarm Framework (ASF)
 
-A modular, fractal, and object-oriented agent orchestration framework designed for high-reliability AI workflows. ASF moves away from static, hardcoded agent graphs toward a **Dynamic Mesh** architecture where agents are first-class Python objects capable of evolving their roles, capabilities, and hierarchical depth.
+A modular, object-oriented framework for orchestrating multi-agent workflows. ASF provides the primitives for building hierarchical, asynchronous, and self-verifying agent systems.
 
-## 🧠 Core Philosophy
+## Core Features
 
-ASF is built on three foundational pillars:
+* **Hierarchical Task Decomposition**: Use `Orchestrator` and `Sub-Orchestrator` classes to break complex goals into manageable sub-tasks.
+* **Asynchronous Message Mesh**: A high-performance `MessageBus` for inter-agent communication using topic-based and wildcard routing.
+* **Verified Execution (Builder/Reviewer)**: Built-in support for the "Bob & Alice" pattern to ensure work is audited before completion.
+* **Dynamic Agent Objects**: Agents are Python objects that manage their own identity, role (Worker, Orchestrator, etc.), and capabilities.
+* **CLI & Config**: A command-line interface (`swarm`) and a central `.swarm/config.yaml` for managing model providers and agent settings.
 
-1.  **Fractal Orchestration**: Complexity is managed by recursion. When a task is too large, an Orchestrator spawm a Sub-Orchestrator. This allows the swarm to scale its reasoning depth dynamically.
-2.  **Verify-Before-Trust (VBT)**: No output is considered "complete" until it has passed a specialized Reviewer agent or a programmatic verification tool. This creates a self-correcting loop.
-3.  **Dynamic Capability Mesh**: Agents are not locked into roles. A "Worker" can be promoted to a "Sub-Orchestrator" or assigned new specialized capabilities on-the-fly, making the swarm elastic and responsive to the task at hand.
+## Installation
 
-## 🏗️ Architecture
-
-The framework follows a hierarchical but fluid structure:
-
-* **Orchestrator**: The high-level "Brain." Responsible for goal decomposition, task prioritization, and managing the lifecycle of sub-swarms.
-* **Sub-Orchestrator**: The "Middle-Management." Manintains coordination for a specific cluster of workers or a specialized functional domain.
-* **Worker (Leaf Agent)**: The "Hands." Highly specialized units designed to execute atomic, verifiable tasks (e.g., Code Building, Document Review, Web Search).
-
-### The Communication Mesh
-Communication is handled via an **Asynchronous Message Bus**. Agents communicate using structured `Message` objects via topics, supporting:
-* **Direct Addressing**: `receiver_id` for targeted communication.
-* **Broadcasting**: `topic` based messaging.
-* **Mesh Listening**: Wildcard `*` subscriptions to observe the entire swarm's activity.
-
-## 🚀 Getting Started
-
-### Prerequisites
-* Python 3.10+
-* `asyncio` (standard library)
-
-### Installation
 ```bash
-git clone <repository-url>
+# Clone the repo
+git clone <repo_url>
 cd agent-swarm-framework
-# No heavy dependencies required for core, but highly recommended for extensions
+
+# Install the framework and the 'swarm' CLI
+pip install -e .
 ```
 
-### Running the Demo
-To see the swarm in action (the classic **Bob & Alice** Builder/Reviewer pattern), run the test suite:
+## Quick Start
 
+### CLI Usage
+Run a predefined workflow directly from your terminal:
 ```bash
-export PYTHONPATH=$PYTHONPATH:.
+swarm "your high-level goal here"
+```
+
+### Python Implementation
+Integrate the framework into your own Python scripts:
+
+```python
+from src.core.bus import MessageBus
+from src.orchestrator.base import Orchestrator
+
+async def main():
+    bus = MessageBus()
+    orch = Orchestrator("main-orch", "Master", bus)
+    await orch.decompose("My complex project goal")
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
+```
+
+### Testing the Swarm
+Run the built-in simulation to verify the Builder/Reviewer loop:
+```bash
 python3 tests/demo_bob_alice.py
 ```
 
-## 🛠️ Development Guide
+## Configuration
 
-### Creating a New Agent
-All agents must inherit from `BaseAgent` in `src/core/agent.py`.
+Manage your model providers and agent roles in `.swarm/config.yaml`.
 
-```python
-from src.core.agent import BaseAgent, AgentRole, Message
+```yaml
+orchestrator:
+  provider: "openrouter"
+  model: "google/gemma-4-31b-it"
 
-class MySpecialist(BaseAgent):
-    def __init__(self, agent_id, identity):
-        super().__init__(agent_id, identity)
-        self.role = AgentRole.WORKER
-        
-    async def handle_message(self, message: Message):
-        # Your logic here
-        pass
-
-    async def execute_task(self, task_id, task_details):
-        # Your execution here
-        pass
+worker_default:
+  provider: "opencode"
+  model: "opencode-go/deepseek-v4-flash"
 ```
 
-### Adding Capabilities
-Capabilities are used to declare what an agent *can* do, allowing Orchestrators to match tasks to the right agents.
-
-```python
-from src.core.agent import Capability
-
-search_cap = Capability(
-    name="web_search", 
-    description="Search the internet for real-time information"
-)
-my_agent.add_capability(search_cap)
-```
-
-## 📜 Protocols & Safety
-
-All agents must adhere to the protocols defined in `.ai/os/protocols.md`. 
-* **Error Handling**: Agents must catch exceptions and publish `task_error` messages to the bus.
-* **Auditability**: Every message is logged to the `MessageBus` history for post-mortem analysis.
+---
+*Developed for high-reliability AI workflows.*
