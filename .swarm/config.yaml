@@ -1,0 +1,27 @@
+# Agent Swarm Framework Configuration
+# Plug and play your preferred intelligence providers here.
+
+# The default provider used by the Orchestrator (Hermes-level reasoning)
+orchestrator:
+  provider: "openrouter"  # Options: openrouter, anthropic, openai, local
+  model: "google/gemma-4-31b-it"
+
+# The default provider used by Workers (Execution/Coding)
+worker_default:
+  provider: "opencode"    # Options: opencode, claude-code, codex, ollama
+  model: "opencode-go/deepseek-v4-flash"
+
+# Advanced: Override specific roles
+role_overrides:
+  builder:
+    provider: "opencode"
+    model: "opencode-go/deepseek-v4-flash"
+  reviewer:
+    provider: "opencode"
+    model: "opencode-go/deepseek-v4-pro"
+
+# System settings
+system:
+  max_swarm_depth: 3
+  retry_limit: 3
+  log_level: "INFO"

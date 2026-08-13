@@ -1,7 +1,10 @@
 from enum import Enum
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING
 import asyncio
+
+if TYPE_CHECKING:
+    from src.core.bus import MessageBus
 
 class AgentRole(Enum):
     ORCHESTRATOR = "orchestrator"
@@ -27,30 +30,28 @@ class Message:
     id: str
     sender_id: str
     receiver_id: str
-    type: str  # e.g., 'task', 'report', 'error', 'approval'
+    type: str
     payload: Dict[str, Any]
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 class BaseAgent:
-    def __init__(self, agent_id: str, identity: str):
+    def __init__(self, agent_id: str, identity: str, bus: Optional["MessageBus"] = None):
         self.agent_id = agent_id
         self.identity = identity
-        self.role = AgentRole.WORKER  # Defaults to worker
+        self.role = AgentRole.WORKER
         self.status = AgentStatus.IDLE
         self.capabilities: Set[Capability] = set()
         self.context: Dict[str, Any] = {}
+        self.bus = bus  # <-- THE FIX: Every agent can now speak on the mesh
         
     async def set_role(self, new_role: AgentRole):
-        """Dynamically promote or demote the agent's role."""
         self.role = new_role
         
     def add_capability(self, capability: Capability):
         self.capabilities.add(capability)
         
     async def handle_message(self, message: Message):
-        """Core logic for receiving and processing messages."""
         raise NotImplementedError("Agents must implement handle_message")
 
     async def execute_task(self, task_id: str, task_details: Dict[str, Any]):
-        """The atomic unit of work for a worker."""
         raise NotImplementedError("Agents must implement execute_task")

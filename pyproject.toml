@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-swarm-framework"
+version = "0.1.0"
+description = "A modular, fractal, and object-oriented agent orchestration framework."
+readme = "README.md"
+authors = [{name = "Jasveer Singh"}]
+requires-python = ">=3.10"
+dependencies = [
+    "pyyaml",
+    "asyncio",
+]
+
+[project.scripts]
+swarm = "swarm:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
