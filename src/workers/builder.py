@@ -1,41 +1,36 @@
-from typing import Any, Dict, Optional
-from workers.base import Worker
-from core.protocol import Message, MessageType
+from typing import Dict, Any
+import asyncio
+from src.core.agent import BaseAgent, AgentRole, AgentStatus, Message
 
-class Builder(Worker):
-    """
-    A specialized worker that acts as a Builder (Bob) in the Bob/Alice pattern.
-    """
-    def __init__(self, agent_id: str, role: str, capability: str):
-        super().__init__(agent_id, role, capability)
-        self.pending_verifications: Dict[str, Dict[str, Any]] = {}
+class Builder(BaseAgent):
+    def __init__(self, agent_id: str, identity: str, model: str = "gpt-4o"):
+        super().__init__(agent_id, identity)
+        self.role = AgentRole.WORKER
+        self.model = model
 
     async def handle_message(self, message: Message):
-        if message.message_type == MessageType.VERIFY_RESPONSE:
-            await self._handle_verification_response(message)
+        if message.type == "task":
+            print(f"[{self.agent_id}] Received task: {message.payload.get('task_id')}. Starting build...")
+            await self.execute_task(message.payload.get("task_id"), message.payload)
         else:
-            await super().handle_message(message)
+            print(f"[{self.agent_id}] Received unexpected message type: {message.type}")
 
-    async def _handle_verification_response(self, message: Message):
-        task_id = message.payload.get("task_id")
-        status = message.payload.get("status")
+    async def execute_task(self, task_id: str, task_details: Dict[str, Any]):
+        self.status = AgentStatus.EXECUTING
+        print(f"[{self.agent_id}] Building: {task_details.get('description', 'unnamed task')}...")
         
-        if status == "approved":
-            print(f"[{self.agent_id}] Task {task_id} was APPROVED by reviewer.")
-        else:
-            print(f"[{self.agent_id}] Task {task_id} was REJECTED by reviewer. Retrying...")
-            if task_id:
-                await self._retry_task(task_id)
-
-    async def _retry_task(self, task_id: str):
-        # Mock retry
-        print(f"[{self.agent_id}] Retrying task {task_id} with corrected content...")
-        await self.send("orchestrator_id", MessageType.RESULT, {
-            "task_id": task_id,
-            "result": "Corrected content that passes verification"
-        })
-        # Note: In a real system, this would be more complex.
-        # For this demo, we'll just trigger another result.
-        # But wait, the orchestrator needs to know this is a result of a retry.
-        # For simplicity, let's just assume the orchestration loop handles it.
-        pass
+        # Simulate work
+        await asyncio.sleep(2) 
+        
+        # Simulate a successful build with some output
+        build_result = {
+            "status": "success",
+            "output": f"Completed build for {task_id}",
+            "artifact_path": f"/tmp/build_{task_id}.txt"
+        }
+        
+        # Send report back to the bus
+        # Note: In a real implementation, we'd find the sender of the task
+        print(f"[{self.agent_id}] Build complete.")
+        self.status = AgentStatus.IDLE
+        # In the real implementation, the Orchestrator would be listening on the bus

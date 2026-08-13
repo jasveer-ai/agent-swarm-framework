@@ -1,54 +1,32 @@
+from typing import Dict, List, Callable, Any, Awaitable
 import asyncio
-from typing import Dict, List, Callable, Any, Union, Coroutine
-from .protocol import Message
-
-# A callback can be a regular function or an async function
-AsyncCallback = Callable[[Message], Coroutine[Any, Any, None]]
-SyncCallback = Callable[[Message], None]
-Callback = Union[SyncCallback, AsyncCallback]
+import uuid
 
 class MessageBus:
-    """
-    A simple in-memory message bus for inter-agent communication.
-    """
     def __init__(self):
-        self.subscribers: Dict[str, List[Callback]] = {}
+        self.subscribers: Dict[str, List[Callable[[Any], Awaitable[None]]]] = {}
+        self.history: List[Any] = []
 
-    def subscribe(self, agent_id: str, callback: Callback):
-        if agent_id not in self.subscribers:
-            self.subscribers[agent_id] = []
-        self.subscribers[agent_id].append(callback)
+    async def subscribe(self, topic: str, callback: Callable[[Any], Awaitable[None]]):
+        """Subscribe to a specific topic or a wildcard '*' for a mesh approach."""
+        if topic not in self.subscribers:
+            self.subscribers[topic] = []
+        self.subscribers[topic].append(callback)
 
-    def publish(self, message: Message):
-        """
-        Publishes a message. Note: This is a synchronous call that 
-        schedules async tasks for subscribers.
-        """
-        # Route to specific receiver
-        if message.receiver_id in self.subscribers:
-            for callback in self.subscribers[message.receiver_id]:
-                self._dispatch(callback, message)
+    async def publish(self, topic: str, message: Any):
+        """Publish a message to a topic, or broadcast to all if topic is '*'"""
+        self.history.append({"topic": topic, "message": message})
         
-        # Also route to broadcast
-        if message.receiver_id == "broadcast":
-            for agent_id, callbacks in self.subscribers.items():
-                if agent_id != message.sender_id:
-                    for callback in callbacks:
-                        self._dispatch(callback, message)
+        # Direct topic subscribers
+        targets = self.subscribers.get(topic, [])
+        
+        # Wildcard/Mesh subscribers
+        if topic != "*":
+            targets.extend(self.subscribers.get("*", []))
+            
+        if targets:
+            tasks = [callback(message) for callback in targets]
+            await asyncio.gather(*tasks)
 
-    def _dispatch(self, callback: Callback, message: Message):
-        import inspect
-        if inspect.iscoroutinefunction(callback):
-            # Schedule the coroutine on the current event loop
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(callback(message))
-            except RuntimeError:
-                # No running loop, this is tricky in a pure sync environment
-                # but in our framework, agents run in a loop.
-                pass
-        else:
-            callback(message)
-
-# Global bus instance for the framework
-bus = MessageBus()
+    def get_history(self, limit: int = 100):
+        return self.history[-limit:]

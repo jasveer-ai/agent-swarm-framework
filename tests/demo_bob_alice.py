@@ -1,124 +1,74 @@
 import asyncio
-import sys
-import os
-
-# Add src to sys.path to allow imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
-
-from orchestrator.base import Orchestrator
-from workers.builder import Builder
-from workers.reviewer import Reviewer
-from core.protocol import MessageType
+import uuid
+from src.core.agent import Message, AgentRole, AgentStatus
+from src.core.bus import MessageBus
+from src.orchestrator.base import Orchestrator
+from src.workers.builder import Builder
+from src.workers.reviewer import Reviewer
 
 async def main():
-    print("--- Starting Agent Swarm Demo: Bob & Alice Pattern ---")
+    print("--- 🚀 Starting Agent Swarm Demo (Bob/Alice Pattern) ---")
+    bus = MessageBus()
 
-    # 1. Initialize Orchestrator
-    # We use a subclass to implement the mediator logic for the demo
-    class MediatorOrchestrator(Orchestrator):
-        async def handle_message(self, message):
-            if message.message_type == MessageType.RESULT:
-                # Check if this is a result from a builder that needs review
-                # In our demo, we'll assume any result from Bob needs review
-                if message.sender_id == "bob_builder":
-                    print(f"[Orchestrator] Received result from {message.sender_id}. Sending to Alice for review...")
-                    await self.send(alice.agent_id, MessageType.VERIFY_REQUEST, message.payload, metadata={"original_message_id": message.message_id})
-                else:
-                    await super().handle_message(message)
-            
-            elif message.message_type == MessageType.VERIFY_RESPONSE:
-                # Alice's decision
-                status = message.payload.get("status")
-                if status == "approved":
-                    print(f"[Orchestrator] Verification SUCCESS! Task is complete.")
-                else:
-                    print(f"[Orchestrator] Verification FAILED! Asking Bob to fix it...")
-                    # Send task back to Bob to "fix"
-                    # We use the same task_id from the original result
-                    task_id = message.payload.get("task_id")
-                    await self.send(bob.agent_id, MessageType.TASK, {
-                        "task_id": task_id,
-                        "description": "Fix the error in the previous task"
-                    })
-            else:
-                await super().handle_message(message)
+    # 1. Initialize Agents
+    orchestrator = Orchestrator("orch-01", "Master Orchestrator", bus)
+    bob = Builder("bob-01", "Bob (Builder)", model="deepseek-v4-flash")
+    alice = Reviewer("alice-01", "Alice (Reviewer)", model="deepseek-v4-pro")
 
-    orchestrator = MediatorOrchestrator(
-        agent_id="orchestrator_id", 
-        role="Orchestrator", 
-        model="gpt-4", 
-        provider="openai"
-    )
+    # 2. Register Subscribers (Mesh Setup)
+    # Orchestrator listens for completions
+    await bus.subscribe("task_complete", orchestrator.handle_message)
+    # Alice listens for build reports to start reviews
+    await bus.subscribe("build_report", alice.handle_message)
+    # Bob listens for tasks
+    await bus.subscribe("new_task", bob.handle_message)
 
-    # 2. Initialize Bob (Builder)
-    bob = Builder(
-        agent_id="bob_builder", 
-        role="Builder", 
-        capability="coding"
-    )
+    # 3. Simulate a Task Workflow
+    task_id = str(uuid.uuid4())[:8]
+    task_payload = {
+        "task_id": task_id,
+        "description": "Implement Admin Dashboard Cards",
+        "complexity": "medium"
+    }
 
-    # 3. Initialize Alice (Reviewer)
-    alice = Reviewer(
-        agent_id="alice_reviewer", 
-        role="Reviewer", 
-        capability="quality_assurance"
-    )
+    print(f"\n[STEP 1] Orchestrator dispatching task: {task_id}")
+    await bus.publish("new_task", Message(
+        id=str(uuid.uuid4()),
+        sender_id=orchestrator.agent_id,
+        receiver_id=bob.agent_id,
+        type="task",
+        payload=task_payload
+    ))
 
-    # Register components
-    orchestrator.add_worker(bob)
+    # Simulate Bob completing the task and sending it to Alice
+    # In a real swarm, Bob would do this internally after his execute_task
+    await asyncio.sleep(1)
+    print(f"\n[STEP 2] Bob finishing build. Sending report to Alice...")
+    await bus.publish("build_report", Message(
+        id=str(uuid.uuid4()),
+        sender_id=bob.agent_id,
+        receiver_id=alice.agent_id,
+        type="build_report",
+        payload={
+            "task_id": task_id,
+            "description": task_payload["description"],
+            "status": "success"
+        }
+    ))
 
-    # --- Scenario 1: Successful Task ---
-    print("\n--- Scenario 1: Successful Task ---")
-    task_id_1 = "task_1"
-    # Manually track the task in orchestrator so it knows it's pending
-    orchestrator.pending_tasks[task_id_1] = {"task_id": task_id_1, "description": "Write a clean python script"}
-    await orchestrator.send(bob.agent_id, MessageType.TASK, {
-        "task_id": task_id_1,
-        "description": "Write a clean python script"
-    })
-
+    # Simulate Alice finishing the review
     await asyncio.sleep(2)
+    print(f"\n[STEP 3] Alice finishing review. Sending final approval to Orchestrator...")
+    await bus.publish("task_complete", Message(
+        id=str(uuid.uuid4()),
+        sender_id=alice.agent_id,
+        receiver_id=orchestrator.agent_id,
+        type="task_complete",
+        payload={"task_id": task_id, "verdict": "APPROVE"}
+    ))
 
-    # --- Scenario 2: Failed Task (Requiring Retry) ---
-    print("\n--- Scenario 2: Failed Task (Requiring Retry) ---")
-    # Monkeypatch Bob to produce an error initially
-    original_execute = bob.execute_logic
-    async def error_execute(task_desc):
-        return "This output contains an error"
-    bob.execute_logic = error_execute
-
-    task_id_2 = "task_2"
-    orchestrator.pending_tasks[task_id_2] = {"task_id": task_id_2, "description": "Write a script with an error"}
-    await orchestrator.send(bob.agent_id, MessageType.TASK, {
-        "task_id": task_id_2,
-        "description": "Write a script with an error"
-    })
-
-    # Allow time for the retry to happen. 
-    # After rejection, Bob will be sent a new TASK.
-    # We need to make sure Bob's "retry" actually works.
-    # For the demo, we'll patch Bob again after the first failure.
-    # But since we don't know exactly when it fails, we'll just let it run.
-    
-    # To make the retry work in the demo, let's make Bob 
-    # switch from error_execute to normal_execute after one call.
-    
-    call_count = 0
-    async def smart_error_execute(task_desc):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return "This output contains an error"
-        return "Fixed and clean output"
-    
-    bob.execute_logic = smart_error_execute
-
-    await asyncio.sleep(4)
-    
-    print("\n--- Demo Finished ---")
-    await orchestrator.stop()
-    await bob.stop()
-    await alice.stop()
+    await asyncio.sleep(1)
+    print("\n--- ✅ Swarm Demo Finished Successfully ---")
 
 if __name__ == "__main__":
     asyncio.run(main())
