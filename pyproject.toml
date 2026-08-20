@@ -7,11 +7,10 @@ name = "agent-swarm-framework"
 version = "0.1.0"
 description = "A modular, fractal, and object-oriented agent orchestration framework."
 readme = "README.md"
-authors = [{name = "Jasveer Singh"}]
 requires-python = ">=3.10"
 dependencies = [
-    "pyyaml",
-    "asyncio",
+    "pydantic>=2.5",
+    "pyyaml>=6",
 ]
 
 [project.scripts]
@@ -19,3 +18,6 @@ swarm = "swarm:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
+
+[tool.setuptools]
+py-modules = ["swarm"]

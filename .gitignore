@@ -1,2 +1,5 @@
 *.egg-info/
+__pycache__/
+*.py[cod]
+.venv/
 swarm_proof.txt

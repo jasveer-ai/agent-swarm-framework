@@ -1,27 +1,196 @@
-# Agent Swarm Framework Configuration
-# Plug and play your preferred intelligence providers here.
+# Provider adapters are named runtime configurations, not hard-coded agent types.
+# No credentials belong here; each CLI uses its existing supported authentication.
+providers:
+  codex_readonly:
+    command: codex
+    args:
+      - exec
+      - --ephemeral
+      - --json
+      - --sandbox
+      - read-only
+      - -C
+      - "{cwd}"
+      - -m
+      - "{model}"
+      - "-"
+    prompt_mode: stdin
+    output_format: codex-jsonl
+    timeout_seconds: 300
+    enforced_access: read_only
 
-# The default provider used by the Orchestrator (Hermes-level reasoning)
-orchestrator:
-  provider: "openrouter"  # Options: openrouter, anthropic, openai, local
-  model: "google/gemma-4-31b-it"
+  codex_workspace:
+    command: codex
+    args:
+      - exec
+      - --ephemeral
+      - --json
+      - --sandbox
+      - workspace-write
+      - -C
+      - "{cwd}"
+      - -m
+      - "{model}"
+      - "-"
+    prompt_mode: stdin
+    output_format: codex-jsonl
+    timeout_seconds: 600
+    enforced_access: workspace_write
 
-# The default provider used by Workers (Execution/Coding)
-worker_default:
-  provider: "opencode"    # Options: opencode, claude-code, codex, ollama
-  model: "opencode-go/deepseek-v4-flash"
+  opencode_worker:
+    command: opencode
+    args:
+      - run
+      - --format
+      - json
+      - --model
+      - "{model}"
+      - --title
+      - "{title}"
+      - --dir
+      - "{cwd}"
+    prompt_mode: stdin
+    output_format: opencode-jsonl
+    timeout_seconds: 600
+    # OpenCode has no CLI sandbox flag. Keep this provider unbound until an
+    # external wrapper or permission policy enforces the declared task boundary.
+    enforced_access: unrestricted
 
-# Advanced: Override specific roles
-role_overrides:
-  builder:
-    provider: "opencode"
-    model: "opencode-go/deepseek-v4-flash"
-  reviewer:
-    provider: "opencode"
-    model: "opencode-go/deepseek-v4-pro"
+# Autonomous runs use this provider. When this Codex session is overseeing the
+# run, pass --plan-file/--plan-json and this extra provider call is skipped.
+overseer:
+  identity: Codex Overseer
+  role: overseer
+  provider: codex_readonly
+  model: gpt-5.6-sol
+  capabilities: [planning]
+  strategy: predict
+  access: read_only
+  quality_tier: high
+  cost_rank: 100
+  max_output_tokens: 4000
+  validation_retries: 1
 
-# System settings
-system:
-  max_swarm_depth: 3
-  retry_limit: 3
-  log_level: "INFO"
+# Add profiles rather than branches in Python. Routing chooses the lowest
+# cost_rank after role, capability, provider-enforced access, and quality gates.
+workers:
+  codex_economy_analyst:
+    identity: Codex Economy Analyst
+    role: worker
+    provider: codex_readonly
+    model: gpt-5.6-luna
+    capabilities: [analysis]
+    strategy: agentic
+    access: read_only
+    quality_tier: economy
+    cost_rank: 5
+    max_output_tokens: 5000
+    validation_retries: 1
+
+  codex_analyst:
+    identity: Codex Analyst
+    role: worker
+    provider: codex_readonly
+    model: gpt-5.6-terra
+    capabilities: [analysis]
+    strategy: agentic
+    access: read_only
+    quality_tier: standard
+    cost_rank: 20
+    max_output_tokens: 7000
+    validation_retries: 1
+
+  codex_high_assurance_analyst:
+    identity: Codex High-Assurance Analyst
+    role: worker
+    provider: codex_readonly
+    model: gpt-5.6-sol
+    capabilities: [analysis]
+    strategy: agentic
+    access: read_only
+    quality_tier: high
+    cost_rank: 45
+    max_output_tokens: 9000
+    validation_retries: 1
+
+  codex_economy_builder:
+    identity: Codex Economy Builder
+    role: worker
+    provider: codex_workspace
+    model: gpt-5.6-luna
+    capabilities: [documentation, implementation, testing]
+    strategy: agentic
+    access: workspace_write
+    quality_tier: economy
+    cost_rank: 10
+    max_output_tokens: 6000
+    validation_retries: 0
+
+  codex_builder:
+    identity: Codex Builder
+    role: worker
+    provider: codex_workspace
+    model: gpt-5.6-terra
+    capabilities: [analysis, documentation, implementation, testing]
+    strategy: agentic
+    access: workspace_write
+    quality_tier: standard
+    cost_rank: 30
+    max_output_tokens: 8000
+    validation_retries: 0
+
+  codex_high_assurance:
+    identity: Codex High-Assurance Builder
+    role: worker
+    provider: codex_workspace
+    model: gpt-5.6-sol
+    capabilities: [analysis, documentation, implementation, testing]
+    strategy: agentic
+    access: workspace_write
+    quality_tier: high
+    cost_rank: 50
+    max_output_tokens: 10000
+    validation_retries: 0
+
+  codex_reviewer:
+    identity: Codex Reviewer
+    role: reviewer
+    provider: codex_readonly
+    model: gpt-5.6-sol
+    capabilities: [review]
+    strategy: predict
+    access: read_only
+    quality_tier: high
+    cost_rank: 40
+    max_output_tokens: 4000
+    validation_retries: 1
+
+routing:
+  rules:
+    - keywords: [implement, build, fix, refactor, code]
+      capabilities: [implementation]
+    - keywords: [test, verify, regression]
+      capabilities: [testing]
+    - keywords: [document, readme, guide]
+      capabilities: [documentation]
+    - keywords: [analyze, investigate, inspect]
+      capabilities: [analysis]
+
+budgets:
+  max_concurrency: 2
+  provider_retry_limit: 1
+  max_provider_calls: 12
+  max_total_tokens: 120000
+  # Zero disables the USD gate. Add versioned model rates under provider.pricing
+  # before enabling it; unknown prices are never treated as free.
+  max_estimated_cost_usd: 0
+
+verification:
+  enabled: true
+  # These read-only complexities are reviewed. Workspace writes are always
+  # reviewed independently of this optional verification switch.
+  complexities: [high]
+
+output:
+  include_bus_history: true
+  include_conversations: true
