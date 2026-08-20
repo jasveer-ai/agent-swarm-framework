@@ -1,6 +1,7 @@
 import contextlib
 import io
 import json
+import os
 import subprocess
 import sys
 import unittest
@@ -96,7 +97,9 @@ class ConfigShowTests(unittest.TestCase):
             data["provider_version_probes"]["b"],
             {"status": "duplicate_command", "same_as": "a"},
         )
-        self.assertEqual(calls[0][0], (["/bin/fixture", "--version"],))
+        self.assertEqual(
+            calls[0][0], ([os.path.realpath("/bin/fixture"), "--version"],)
+        )
         self.assertFalse(calls[0][1]["shell"])
         self.assertEqual(calls[0][1]["timeout"], 2)
 
