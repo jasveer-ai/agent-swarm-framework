@@ -204,6 +204,47 @@ Omit the plan for autonomous decomposition:
 swarm "Investigate the failure" --json
 ```
 
+## Local ephemeral runs
+
+Use a managed worktree when a local worker may change files but the caller only
+needs a complete, portable artifact set:
+
+```bash
+swarm "Implement and verify the scoped change" \
+  --plan-file /path/to/plan.json \
+  --local-artifacts-dir /path/outside-the-repository/swarm-runs
+```
+
+This mode requires the source checkout to be clean. It creates a detached
+temporary worktree at the current `HEAD`, runs every worker and reviewer there,
+then writes one run-ID directory containing:
+
+- `run.json`, the aggregate typed run record;
+- `run.events.ndjson`, the canonical chronological message-bus history;
+- `workspace.patch`, a binary Git patch containing all tracked and non-ignored
+  untracked workspace changes;
+- `manifest.json`, which binds the run, base commit, workspace status, artifact
+  names, and SHA-256 digests.
+
+The manifest is written last and marks the artifact directory complete. Only
+after all four artifacts have been written atomically does the CLI remove the
+managed worktree. Rejected, blocked, and modeled failed runs follow the same
+artifact-first cleanup. If execution, artifact persistence, or cleanup fails
+unexpectedly, the CLI keeps the recoverable run state and prints its exact path
+instead of deleting unpreserved work.
+
+Ignored build products, caches, virtual environments, and credentials are
+deliberately excluded from `workspace.patch`; they are disposable execution
+state, not source artifacts. Keep the artifact directory outside the source
+repository and treat it as sensitive because plans, messages, and patches can
+contain task data.
+
+Managed Git commands and provider subprocesses also discard inherited
+repository- and difftool-scoping variables such as `GIT_DIR`, `GIT_WORK_TREE`,
+and `GIT_DIFF_*`. This prevents a CLI started by a hook, editor diff, or another
+checkout from silently binding workers to the wrong repository. Explicit SSH
+authentication configuration remains available to providers.
+
 ## Configuration
 
 The full example is in `.swarm/config.yaml`.
@@ -384,6 +425,10 @@ Both exports use atomic replacement. Task inputs and explicit agent messages
 are intentionally preserved verbatim for auditability, so do not place secrets
 in plans or persist artifacts containing sensitive task data.
 
+For mutation-capable local runs, prefer `--local-artifacts-dir`. It adds the
+workspace patch and manifest and owns the temporary worktree lifecycle described
+in [Local ephemeral runs](#local-ephemeral-runs).
+
 ## Tests
 
 The default suite uses scripted providers and makes no paid model calls:
@@ -401,3 +446,6 @@ access and quality filtering, conservative failed-attempt accounting, atomic
 budgets, writer serialization and no-retry policy, mandatory write review,
 process-group cancellation, secret redaction, CLI JSONL parsing, causality,
 delivery outcomes, atomic aggregate/NDJSON artifacts, and complete bus history.
+It also proves that managed local runs preserve tracked, binary, empty, and
+untracked changes before removing their worktree, while artifact or framework
+failures retain a recovery path.

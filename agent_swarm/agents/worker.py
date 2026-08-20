@@ -21,8 +21,10 @@ class WorkerAgent(ObjectAgent):
         """Execute exactly one assigned task in the declared workspace.
 
         Respect the object's access boundary. Report only changes and checks
-        actually performed. Return blocked when missing authority, tools, or
-        evidence prevents a truthful completion claim.
+        actually performed. Make the outcome self-contained: include every
+        changed file, verification result, and unresolved risk needed after an
+        ephemeral local workspace is removed. Return blocked when missing
+        authority, tools, or evidence prevents a truthful completion claim.
         """
 
         ...

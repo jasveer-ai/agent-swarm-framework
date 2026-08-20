@@ -186,10 +186,22 @@ class CLIProviderTests(unittest.IsolatedAsyncioTestCase):
         )
         prompt = "$(touch /tmp/should-not-exist)"
 
-        with patch(
-            "agent_swarm.providers.cli.asyncio.create_subprocess_exec",
-            new=AsyncMock(return_value=process),
-        ) as create:
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GIT_DIR": "/unrelated/repository/.git",
+                    "GIT_WORK_TREE": ".",
+                    "GIT_DIFF_TOOL": "vscode",
+                    "GIT_SSH_COMMAND": "ssh -F /path/to/config",
+                },
+                clear=False,
+            ),
+            patch(
+                "agent_swarm.providers.cli.asyncio.create_subprocess_exec",
+                new=AsyncMock(return_value=process),
+            ) as create,
+        ):
             result = await provider.run(
                 prompt,
                 model="fixture-model",
@@ -204,6 +216,13 @@ class CLIProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output, "done")
         self.assertEqual(
             create.await_args.kwargs["start_new_session"], os.name == "posix"
+        )
+        child_environment = create.await_args.kwargs["env"]
+        self.assertNotIn("GIT_DIR", child_environment)
+        self.assertNotIn("GIT_WORK_TREE", child_environment)
+        self.assertNotIn("GIT_DIFF_TOOL", child_environment)
+        self.assertEqual(
+            child_environment["GIT_SSH_COMMAND"], "ssh -F /path/to/config"
         )
 
     async def test_cancellation_terminates_and_reaps_provider_process_group(self):

@@ -9,6 +9,7 @@ import time
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from agent_swarm.core.config import ProviderConfig
+from agent_swarm.core.environment import subprocess_environment
 from agent_swarm.providers.base import (
     ProviderError,
     ProviderResult,
@@ -259,6 +260,7 @@ class CLIProvider:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 start_new_session=os.name == "posix",
+                env=subprocess_environment(),
             )
         except FileNotFoundError as error:
             raise ProviderError(

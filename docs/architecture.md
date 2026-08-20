@@ -52,6 +52,9 @@ flowchart LR
    fail-closed review.
 7. The runner returns a typed aggregate snapshot and the chronological event
    sequence. Persistence is always explicit.
+8. In explicit local ephemeral mode, the CLI captures the aggregate record,
+   canonical NDJSON, a binary workspace patch, and a digest manifest before it
+   removes the worktree it created.
 
 ## Event and artifact model
 
@@ -67,6 +70,19 @@ provider events.
 
 Both files are written by atomic replacement. An interrupted write leaves the
 previous target intact rather than a partial JSON document or NDJSON line.
+
+Local ephemeral mode extends this pair with `workspace.patch` and
+`manifest.json`. The patch captures tracked changes relative to the starting
+commit plus non-ignored untracked files, including binary and empty files. The
+manifest is written last as the completeness marker and binds each artifact
+digest to its base commit and run ID. Cleanup is deliberately ordered after
+artifact completion; an unexpected execution or persistence failure retains the
+managed path for recovery.
+
+Git repository and difftool variables inherited from a parent hook or editor
+are removed from managed Git commands and provider subprocesses. Checkout
+selection comes from explicit cwd/arguments; intentional authentication such as
+`GIT_SSH_COMMAND` is preserved.
 
 ## Budget semantics
 
@@ -101,6 +117,10 @@ pricing for every routed provider.
   of scope.
 - Workspace exclusion is process-local. Multiple framework processes need
   separate worktrees or an external lock.
+- `--local-artifacts-dir` owns one temporary worktree for one CLI run. It does
+  not discover or delete pre-existing worktrees, and intentionally excludes
+  ignored caches, build products, virtual environments, and credentials from
+  its source patch.
 - CLI stdout and stderr are currently captured before diagnostics are bounded.
 - A version probe confirms the provider executable, not model entitlement or
   compatibility. Validate configured model IDs with the installed provider CLI

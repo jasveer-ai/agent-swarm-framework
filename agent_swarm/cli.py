@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import sys
@@ -10,7 +11,15 @@ from pathlib import Path
 
 from agent_swarm.core.config import ConfigurationError, load_config
 from agent_swarm.core.config_inspection import inspect_config, render_human
-from agent_swarm.core.run import TaskPlan
+from agent_swarm.core.run import SwarmRunResult, TaskPlan
+from agent_swarm.core.worktree import (
+    ManagedWorktree,
+    WorktreeError,
+    capture_workspace_patch,
+    create_managed_worktree,
+    remove_managed_worktree,
+    workspace_status,
+)
 from agent_swarm.swarm_runner import SwarmRunner
 
 
@@ -60,6 +69,13 @@ def _legacy_parser() -> argparse.ArgumentParser:
         "--events-output",
         help="Write the canonical bus chronology as NDJSON to this path",
     )
+    parser.add_argument(
+        "--local-artifacts-dir",
+        help=(
+            "run in a managed temporary Git worktree, write a complete artifact "
+            "set under this directory, then remove the worktree"
+        ),
+    )
     return parser
 
 
@@ -86,6 +102,76 @@ def _write_text_atomic(path: str | Path, content: str) -> None:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
         raise
+
+
+def _write_bytes_atomic(path: str | Path, content: bytes) -> None:
+    """Replace one binary artifact only after its complete content reaches disk."""
+
+    target = Path(path)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=target.parent,
+            prefix=f".{target.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
+    except BaseException:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+        raise
+
+
+def _write_local_artifacts(
+    artifacts_root: str | Path,
+    worktree: ManagedWorktree,
+    result: SwarmRunResult,
+) -> Path:
+    """Persist the complete run and workspace state before cleanup is allowed."""
+
+    artifact_dir = Path(artifacts_root).resolve() / result.record.run_id
+    artifact_dir.mkdir(parents=True, exist_ok=False)
+    patch = capture_workspace_patch(worktree)
+    status = workspace_status(worktree)
+    events = result.events_to_ndjson()
+    run_content = result.to_json() + "\n"
+    events_content = events + ("\n" if events else "")
+
+    _write_text_atomic(artifact_dir / "run.json", run_content)
+    _write_text_atomic(artifact_dir / "run.events.ndjson", events_content)
+    _write_bytes_atomic(artifact_dir / "workspace.patch", patch)
+    manifest = {
+        "schema_version": "1.0",
+        "run_id": result.record.run_id,
+        "run_status": result.record.status,
+        "base_commit": worktree.base_commit,
+        "workspace_status": list(status),
+        "artifacts": {
+            "run": {
+                "path": "run.json",
+                "sha256": hashlib.sha256(run_content.encode("utf-8")).hexdigest(),
+            },
+            "events": {
+                "path": "run.events.ndjson",
+                "sha256": hashlib.sha256(events_content.encode("utf-8")).hexdigest(),
+            },
+            "workspace_patch": {
+                "path": "workspace.patch",
+                "sha256": hashlib.sha256(patch).hexdigest(),
+            },
+        },
+    }
+    _write_text_atomic(
+        artifact_dir / "manifest.json",
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+    )
+    return artifact_dir
 
 
 def _config_show_parser() -> argparse.ArgumentParser:
@@ -131,21 +217,63 @@ def _run_legacy(argv: list[str]) -> None:
         and Path(args.output).resolve() == Path(args.events_output).resolve()
     ):
         parser.error("--output and --events-output must use different paths")
+    if args.local_artifacts_dir and (args.output or args.events_output):
+        parser.error(
+            "--local-artifacts-dir writes both standard artifacts; do not combine "
+            "it with --output or --events-output"
+        )
 
     config_path = os.path.abspath(args.config)
+    managed_worktree: ManagedWorktree | None = None
+    artifact_dir: Path | None = None
     try:
         plan = _load_plan(args)
+        load_config(config_path)
+        run_cwd = os.getcwd()
+        if args.local_artifacts_dir:
+            managed_worktree = create_managed_worktree(run_cwd)
+            run_cwd = os.fspath(managed_worktree.path)
         result = asyncio.run(
             run_swarm(
                 args.goal,
                 config_path,
-                cwd=os.getcwd(),
+                cwd=run_cwd,
                 plan=plan,
             )
         )
-    except (OSError, ValueError, ConfigurationError) as error:
-        print(f"swarm configuration error: {error}", file=sys.stderr)
+        if managed_worktree is not None:
+            artifact_dir = _write_local_artifacts(
+                args.local_artifacts_dir,
+                managed_worktree,
+                result,
+            )
+            remove_managed_worktree(managed_worktree)
+            managed_worktree = None
+    except (OSError, ValueError, ConfigurationError, WorktreeError) as error:
+        print(f"swarm error: {error}", file=sys.stderr)
+        if managed_worktree is not None:
+            recovery_path = (
+                managed_worktree.path
+                if managed_worktree.path.exists()
+                else managed_worktree.temporary_root
+            )
+            print(
+                f"managed run state retained for recovery: {recovery_path}",
+                file=sys.stderr,
+            )
         raise SystemExit(2) from error
+    except BaseException:
+        if managed_worktree is not None:
+            recovery_path = (
+                managed_worktree.path
+                if managed_worktree.path.exists()
+                else managed_worktree.temporary_root
+            )
+            print(
+                f"managed run state retained for recovery: {recovery_path}",
+                file=sys.stderr,
+            )
+        raise
 
     rendered = result.to_json()
     try:
@@ -161,6 +289,9 @@ def _run_legacy(argv: list[str]) -> None:
         print(rendered)
     else:
         print(result.final_output)
+        if artifact_dir is not None:
+            print(f"\nArtifacts: {artifact_dir}")
+            print("Managed worktree removed after artifact completion.")
         usage = result.record.usage
         print(
             f"\nRun {result.record.run_id}: {result.record.status}; "
