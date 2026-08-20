@@ -1,14 +1,22 @@
-# Agent Swarm Framework
+# 🐝 Agent Swarm Framework
 
-A typed, provider-configurable Python runtime for running agent swarms with a
-caller-controlled overseer, capability-aware routing, bounded cost, and a full
-explicit message-bus record.
+A typed, provider-configurable Python runtime for auditable agent swarms with a
+caller-controlled overseer, capability-aware routing, explicit access
+boundaries, and a complete message-bus record.
+
+> **Status:** alpha. The typed core and hermetic suite are usable, but the
+> provider CLI remains part of the trusted computing base and per-call CLI
+> token or dollar ceilings are not hard limits.
+
+The bee is the project mark: one swarm, specialized workers, and an observable
+handoff trail. See [Architecture](docs/architecture.md),
+[Contributing](CONTRIBUTING.md), [Security](SECURITY.md), and [License](LICENSE).
 
 ## Architectural stance
 
 This project implements a focused subset of the object-oriented agent model in
-[*Object-Oriented Agents: A Software Engineering Paradigm for Agentic
-Systems*](https://arxiv.org/abs/2607.20709):
+[*NVIDIA-labs OO Agents: Native Python Object-Oriented
+Agents*](https://arxiv.org/abs/2607.20709):
 
 - an agent is a normal Python object;
 - fields hold identity, capabilities, access, and task state;
@@ -61,20 +69,65 @@ The deterministic `SwarmRunner` owns orchestration:
 7. Route configured task complexities and every workspace-write result through
    a typed, fail-closed `ReviewerAgent`.
 8. Return task records, routing choices, provider attempts, normalized usage,
-   ordered bus history, and conversation views.
+   ordered bus events, and derived conversation views.
 
 Codex and OpenCode are example CLI adapters. They are provider configurations,
 not hard-coded agent types. Additional providers implement the small
 `ModelProvider` protocol.
 
+## Generic specialist extension
+
+For a narrow application-specific integration, construct a typed `WorkSignal`,
+register generic `AgentProfile` specialists, and route it with an explicit
+allow-list `ApprovalPolicy`. `SpecialistRouter` first checks the action and
+access boundary, then selects the lowest `cost_rank` specialist that has every
+required capability and the exact access boundary. Missing specialists and
+policy denials raise terminal errors before a provider call.
+
+```python
+from agent_swarm.core.config import load_config
+from agent_swarm.core.specialists import (
+    ApprovalPolicy,
+    SpecialistRegistry,
+    SpecialistRouter,
+    WorkSignal,
+)
+
+config = load_config(".swarm/config.yaml")
+router = SpecialistRouter(
+    SpecialistRegistry(config.workers),
+    ApprovalPolicy(allowed_actions=("inspect",)),
+)
+specialist, brief = router.route(
+    WorkSignal(
+        id="inspect-1",
+        summary="Inspect a bounded task",
+        requested_action="inspect",
+        required_capabilities=("analysis",),
+        access="read_only",
+    )
+)
+```
+
+`WorkSignal`, `EvidenceArtifact`, and `DecisionBrief` are Pydantic contracts,
+so callers can persist or exchange JSON without adopting a product-specific
+agent model. The existing `SwarmRunner` continues to execute typed `TaskPlan`
+work; its worker selector reuses the registry's exact capability/access filter.
+
+Webhook ingress, durable queues, deployment packaging, and externally hosted
+specialists remain future integration work. They are intentionally outside this
+in-process framework boundary.
+
 ## Install
 
 ```bash
-git clone <repository-url>
 cd agent-swarm-framework
 python3 -m venv .venv
-.venv/bin/pip install -e .
+.venv/bin/pip install -e '.[dev]'
 ```
+
+Run these commands from the parent directory of a source checkout. The hosting
+page provides its canonical HTTPS or SSH clone URL.
 
 Provider CLIs continue to use their supported authentication. Never put
 credentials in `.swarm/config.yaml`.
@@ -115,9 +168,7 @@ From Python:
 ```python
 import asyncio
 
-from src.core.config import load_config
-from src.core.run import TaskPlan
-from src.swarm_runner import SwarmRunner
+from agent_swarm import SwarmRunner, TaskPlan, load_config
 
 
 async def main():
@@ -144,6 +195,9 @@ async def main():
 asyncio.run(main())
 ```
 
+[`examples/bob_alice.py`](examples/bob_alice.py) is a zero-cost scripted
+builder/reviewer conversation with a complete bus transcript.
+
 Omit the plan for autonomous decomposition:
 
 ```bash
@@ -154,18 +208,41 @@ swarm "Investigate the failure" --json
 
 The full example is in `.swarm/config.yaml`.
 
+Inspect a configuration without starting a provider or making a model call:
+
+```bash
+swarm config show
+swarm config show --config /path/to/config.yaml --json
+```
+
+`config show` loads and validates the YAML before rendering the normalized
+provider, agent, routing, budget, verification, output-history, and
+bus-handoff configuration. It resolves executable paths passively by default.
+Use `--probe-versions` only when needed: it runs each distinct resolved provider
+executable directly with `--version`, using a short timeout. The normal
+`swarm <goal> [options]` invocation remains unchanged.
+
+The probe confirms only the executable version. It cannot prove that an account
+is entitled to a configured model or that the installed CLI supports that model;
+validate model IDs with the provider before launching a broad audit.
+
+The sample profiles map high-assurance work to `gpt-5.6-sol`, standard work to
+`gpt-5.6-terra`, and economy work to `gpt-5.6-luna`. These are explicit,
+reviewable defaults rather than moving aliases; revalidate them when provider
+guidance or the installed CLI changes.
+
 ```yaml
 providers:
   codex_readonly:
     command: codex
-    args: [exec, --ephemeral, --json, --sandbox, read-only, -C, "{cwd}", -m, "{model}", "-"]
+    args: [exec, --ephemeral, --ignore-user-config, --json, --sandbox, read-only, -C, "{cwd}", -m, "{model}", "-"]
     prompt_mode: stdin
     output_format: codex-jsonl
     enforced_access: read_only
 
   codex_workspace:
     command: codex
-    args: [exec, --ephemeral, --json, --sandbox, workspace-write, -C, "{cwd}", -m, "{model}", "-"]
+    args: [exec, --ephemeral, --ignore-user-config, --json, --sandbox, workspace-write, -C, "{cwd}", -m, "{model}", "-"]
     prompt_mode: stdin
     output_format: codex-jsonl
     enforced_access: workspace_write
@@ -191,7 +268,7 @@ workers:
     validation_retries: 0
 
 budgets:
-  max_concurrency: 2
+  max_concurrency: 1
   provider_retry_limit: 1
   max_provider_calls: 12
   max_total_tokens: 120000
@@ -220,11 +297,12 @@ included OpenCode adapter inactive until an external sandbox or permission
 policy enforces its boundary.
 
 This prevents a cheap but incapable or over-privileged model from receiving a
-task. Call count, token reservations, retries, timeouts, concurrency, and cost
-are recorded by agent and provider/model. Provider-reported and configured-rate
-estimates remain separate; failed attempts are conservatively charged against
-their reservation when exact usage is unavailable. The same reservation-cost
-provenance is retained for successful calls that omit usage telemetry.
+task. `cost_rank` is a caller-defined preference, not a live price. Call count,
+token reservations, retries, timeouts, concurrency, and cost are recorded by
+agent and provider/model. Provider-reported and configured-rate estimates remain
+separate; failed attempts are conservatively charged against their reservation
+when exact usage is unavailable. The same reservation-cost provenance is
+retained for successful calls that omit usage telemetry.
 
 Set `max_estimated_cost_usd` above zero only after adding versioned pricing for
 every provider used by the run. An unpriced provider is rejected under a strict
@@ -232,7 +310,10 @@ USD limit instead of being treated as free. CLI adapters can enforce admission
 between calls, but cannot guarantee a hard per-request dollar or token ceiling.
 `max_output_tokens` is therefore an admission reservation and prompt budget for
 CLI providers, not a provider-enforced cap; reported overage is detected only
-after a call completes.
+after a call completes. A completed output is preserved when that happens, while
+the overall run is marked `budget_exhausted` and later admissions are refused.
+The example starts with `max_concurrency: 1` so an uncalibrated provider cannot
+start several unexpectedly expensive calls before the first usage report lands.
 
 Read-only providers may retry transient failures and malformed typed responses
 within the configured limits. Workspace writers never retry provider failures,
@@ -253,17 +334,23 @@ configuration; this framework marks the stock adapter `unrestricted` and does
 not route work to it. Use a sandboxed provider or external execution boundary
 before binding it.
 
+The example Codex adapters also pass `--ignore-user-config` so nested runs do
+not inherit host user configuration. This makes their invocation configuration
+deterministic, but it is not a substitute for the explicit CLI sandbox or any
+external operating-system, network, or credential boundary.
+
 The CLI adapter captures process output in memory, then truncates and redacts
 diagnostics before persistence; the capture itself is not yet streaming or
 memory-bounded. Timeout and cancellation terminate and reap the provider process
 group so tool descendants do not continue editing in the background. Provider
 reasoning events are not persisted.
 
-The canonical history contains only explicit inter-agent envelopes and
-normalized usage. Messages carry run correlation and request/response causation
-IDs; dependency fan-in and terminal run aggregation also retain every causal
-message ID. Subscriber delivery outcomes are recorded without persisting
-callback error text.
+The canonical bus history contains only explicit inter-agent envelopes.
+Messages carry run correlation and request/response causation IDs; dependency
+fan-in and terminal run aggregation also retain every causal message ID.
+Subscriber delivery outcomes are recorded without persisting callback error
+text. Normalized usage belongs to the aggregate run record rather than the bus
+event schema.
 
 ## Run record
 
@@ -279,10 +366,23 @@ callback error text.
 - conversations grouped both as `sender->receiver` and chronologically per
   participating agent.
 
-Nothing is persisted by default. Pass `--output /path/run.json` to save the
-full record explicitly. Task inputs and explicit agent messages are intentionally
-preserved verbatim for auditability, so do not place secrets in plans or persist
-a run record that contains sensitive task data.
+Nothing is persisted by default. Export either or both explicit artifacts:
+
+```bash
+swarm "Inspect the repository" \
+  --plan-file /path/to/plan.json \
+  --output /path/run.json \
+  --events-output /path/run.events.ndjson
+```
+
+- `run.json` is one aggregate snapshot with tasks, selections, invocations,
+  usage, optional embedded history, and conversation projections.
+- `run.events.ndjson` is a post-run export of the canonical chronological event
+  sequence, with one complete bus envelope per line for replay and ingestion.
+
+Both exports use atomic replacement. Task inputs and explicit agent messages
+are intentionally preserved verbatim for auditability, so do not place secrets
+in plans or persist artifacts containing sensitive task data.
 
 ## Tests
 
@@ -290,6 +390,7 @@ The default suite uses scripted providers and makes no paid model calls:
 
 ```bash
 .venv/bin/python -m unittest discover -s tests -p 'test_*.py' -v
+.venv/bin/ruff check agent_swarm examples tests swarm.py
 .venv/bin/python tests/smoke_test.py
 .venv/bin/python tests/integration_swarm_test.py  # skips unless explicitly enabled
 ```
@@ -299,4 +400,4 @@ caller-driven oversight, autonomous planning, dependency blocking, enforced
 access and quality filtering, conservative failed-attempt accounting, atomic
 budgets, writer serialization and no-retry policy, mandatory write review,
 process-group cancellation, secret redaction, CLI JSONL parsing, causality,
-delivery outcomes, and complete bus history.
+delivery outcomes, atomic aggregate/NDJSON artifacts, and complete bus history.

@@ -1,23 +1,46 @@
 [build-system]
-requires = ["setuptools", "wheel"]
+requires = ["setuptools>=77.0.3", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-swarm-framework"
 version = "0.1.0"
-description = "A modular, fractal, and object-oriented agent orchestration framework."
+description = "Typed, provider-configurable orchestration for auditable agent swarms."
 readme = "README.md"
 requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["agents", "orchestration", "multi-agent", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
 dependencies = [
     "pydantic>=2.5",
     "pyyaml>=6",
 ]
 
+[project.optional-dependencies]
+dev = ["ruff>=0.12"]
+
 [project.scripts]
-swarm = "swarm:main"
+swarm = "agent_swarm.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["agent_swarm*"]
 
-[tool.setuptools]
-py-modules = ["swarm"]
+[tool.setuptools.package-data]
+agent_swarm = ["py.typed"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

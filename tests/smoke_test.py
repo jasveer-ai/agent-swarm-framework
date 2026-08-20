@@ -3,10 +3,10 @@
 import asyncio
 import json
 
-from src.core.config import SwarmConfig
-from src.core.run import TaskPlan
-from src.providers.base import ProviderResult, TokenUsage
-from src.swarm_runner import SwarmRunner
+from agent_swarm.core.config import SwarmConfig
+from agent_swarm.core.run import TaskPlan
+from agent_swarm.providers.base import ProviderResult, TokenUsage
+from agent_swarm.swarm_runner import SwarmRunner
 
 
 class SmokeProvider:

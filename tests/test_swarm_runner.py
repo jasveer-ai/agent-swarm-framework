@@ -2,10 +2,10 @@ import asyncio
 import json
 import unittest
 
-from src.core.config import SwarmConfig
-from src.core.run import TaskPlan
-from src.providers.base import ProviderError, ProviderResult, TokenUsage
-from src.swarm_runner import SwarmRunner
+from agent_swarm.core.config import SwarmConfig
+from agent_swarm.core.run import TaskPlan
+from agent_swarm.providers.base import ProviderError, ProviderResult, TokenUsage
+from agent_swarm.swarm_runner import SwarmRunner
 
 
 def outcome(status="completed", summary="worker evidence"):
@@ -44,6 +44,8 @@ class ScriptedProvider:
         output_value = self.outputs.pop(0)
         if isinstance(output_value, Exception):
             raise output_value
+        if isinstance(output_value, ProviderResult):
+            return output_value
         return ProviderResult(
             output=output_value,
             usage=TokenUsage(
@@ -89,6 +91,13 @@ class MissingUsageProvider(ScriptedProvider):
         self.calls.append(
             {"prompt": prompt, "model": model, "title": title, "cwd": cwd}
         )
+        return ProviderResult(
+            output=self.outputs.pop(0),
+            usage=TokenUsage(source="unavailable"),
+            provider=self.name,
+            model=model,
+            duration_seconds=0.01,
+        )
 
 
 class GateObservingProvider(ScriptedProvider):
@@ -131,15 +140,6 @@ class GateObservingProvider(ScriptedProvider):
             model=model,
             duration_seconds=0.01,
         )
-        return ProviderResult(
-            output=self.outputs.pop(0),
-            usage=TokenUsage(source="unavailable"),
-            provider=self.name,
-            model=model,
-            duration_seconds=0.01,
-        )
-
-
 def make_config(**overrides):
     data = {
         "providers": {
@@ -475,6 +475,51 @@ class SwarmRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.record.status, "budget_exhausted")
         self.assertIn("BudgetExceeded", result.record.tasks[0].error)
 
+    async def test_successful_output_is_preserved_after_reported_usage_overage(self):
+        provider = ScriptedProvider(
+            [
+                ProviderResult(
+                    output=outcome(summary="expensive but complete"),
+                    usage=TokenUsage(input_tokens=2000, output_tokens=10),
+                    provider="scripted",
+                    model="fixture-model",
+                    duration_seconds=0,
+                )
+            ]
+        )
+        config = make_config(
+            budgets={
+                "max_concurrency": 1,
+                "provider_retry_limit": 0,
+                "max_provider_calls": 2,
+                "max_total_tokens": 1500,
+            }
+        )
+        plan = TaskPlan.from_data(
+            [
+                {
+                    "id": "t1",
+                    "description": "Analyze",
+                    "complexity": "low",
+                    "required_capabilities": ["analysis"],
+                    "max_output_tokens": 100,
+                }
+            ]
+        )
+
+        result = await SwarmRunner(config, providers=provider_map(provider)).run(
+            "Analyze", cwd=".", plan=plan
+        )
+
+        self.assertEqual(result.record.status, "budget_exhausted")
+        self.assertEqual(result.record.tasks[0].status, "succeeded")
+        self.assertEqual(result.record.tasks[0].output, "expensive but complete")
+        self.assertEqual(result.record.invocations[0].status, "succeeded")
+        self.assertEqual(
+            result.record.usage["budget_overage_reason"],
+            "provider reported usage above the token budget",
+        )
+
     async def test_success_without_usage_accounts_reservation_estimate(self):
         provider = MissingUsageProvider([outcome()])
         plan = TaskPlan.from_data(
@@ -494,6 +539,10 @@ class SwarmRunnerTests(unittest.IsolatedAsyncioTestCase):
         )
 
         invocation = result.record.invocations[0]
+        self.assertEqual(result.record.status, "succeeded")
+        self.assertEqual(result.record.tasks[0].status, "succeeded")
+        self.assertEqual(invocation.status, "succeeded")
+        self.assertEqual(invocation.usage["source"], "unavailable")
         self.assertEqual(invocation.cost_source, "reservation_estimate")
         self.assertGreater(invocation.accounted_cost_usd, 0)
         self.assertEqual(

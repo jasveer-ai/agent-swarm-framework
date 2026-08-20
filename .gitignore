@@ -3,3 +3,10 @@ __pycache__/
 *.py[cod]
 .venv/
 swarm_proof.txt
+.DS_Store
+.coverage
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/

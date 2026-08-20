@@ -1,7 +1,7 @@
 import unittest
 
-from src.core.bus import MessageBus
-from src.core.protocol import Message
+from agent_swarm.core.bus import MessageBus
+from agent_swarm.core.protocol import Message
 
 
 class MessageBusTests(unittest.IsolatedAsyncioTestCase):

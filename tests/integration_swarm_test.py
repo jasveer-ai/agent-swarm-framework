@@ -4,9 +4,9 @@ import asyncio
 import os
 import sys
 
-from src.core.config import load_config
-from src.core.run import TaskPlan
-from src.swarm_runner import SwarmRunner
+from agent_swarm.core.config import load_config
+from agent_swarm.core.run import TaskPlan
+from agent_swarm.swarm_runner import SwarmRunner
 
 
 async def run_live_test():

@@ -6,6 +6,7 @@ providers:
     args:
       - exec
       - --ephemeral
+      - --ignore-user-config
       - --json
       - --sandbox
       - read-only
@@ -24,6 +25,7 @@ providers:
     args:
       - exec
       - --ephemeral
+      - --ignore-user-config
       - --json
       - --sandbox
       - workspace-write
@@ -177,7 +179,9 @@ routing:
       capabilities: [analysis]
 
 budgets:
-  max_concurrency: 2
+  # Start serially so an unexpectedly expensive CLI call trips the admission
+  # gate before more work starts. Raise only after measuring the provider setup.
+  max_concurrency: 1
   provider_retry_limit: 1
   max_provider_calls: 12
   max_total_tokens: 120000

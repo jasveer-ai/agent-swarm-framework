@@ -3,9 +3,14 @@ import unittest
 
 from pydantic import ValidationError
 
-from src.core.config import ConfigurationError, ProviderConfig, SwarmConfig
-from src.core.routing import NoEligibleWorker, WorkerSelector
-from src.core.run import TaskOutcome, TaskPlan, TaskSpec
+from agent_swarm.core.config import (
+    ConfigurationError,
+    ProviderConfig,
+    RoutingRule,
+    SwarmConfig,
+)
+from agent_swarm.core.routing import NoEligibleWorker, WorkerSelector
+from agent_swarm.core.run import TaskOutcome, TaskPlan, TaskSpec
 
 
 def config_data():
@@ -113,6 +118,27 @@ class ConfigAndRoutingTests(unittest.TestCase):
                 TaskSpec(id="t1", description="Fix parser", complexity="low")
             )
 
+    def test_reviewer_uses_explicit_capability_contract(self):
+        config = SwarmConfig.from_dict(config_data())
+        selector = WorkerSelector(config.workers, config.routing_rules)
+
+        selected, decision = selector.select(
+            TaskSpec(
+                id="t1:review",
+                description=(
+                    "Review workspace-write implementation, testing, documentation, "
+                    "and analysis results"
+                ),
+                required_capabilities=("review",),
+                complexity="low",
+                access="read_only",
+            ),
+            role="reviewer",
+        )
+
+        self.assertEqual(selected.agent_id, "reviewer")
+        self.assertEqual(decision.required_capabilities, ["review"])
+
     def test_rejects_unknown_provider_reference(self):
         data = config_data()
         data["overseer"]["provider"] = "missing"
@@ -148,6 +174,34 @@ class ConfigAndRoutingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "must not be blank"):
             TaskOutcome(status="completed", summary="done", evidence=("   ",))
 
+    def test_routing_keywords_do_not_match_inside_other_words(self):
+        selector = WorkerSelector(
+            SwarmConfig.from_dict(config_data()).workers,
+            (RoutingRule(keywords=("code",), capabilities=("implementation",)),),
+        )
+
+        capabilities = selector.required_capabilities(
+            TaskSpec(
+                id="inspect-codex",
+                description="Inspect Codex provider compatibility",
+                required_capabilities=("analysis",),
+            )
+        )
+
+        self.assertEqual(capabilities, {"analysis"})
+
+    def test_routing_keywords_match_standalone_terms(self):
+        selector = WorkerSelector(
+            SwarmConfig.from_dict(config_data()).workers,
+            (RoutingRule(keywords=("code",), capabilities=("implementation",)),),
+        )
+
+        capabilities = selector.required_capabilities(
+            TaskSpec(id="change", description="Inspect the code path")
+        )
+
+        self.assertEqual(capabilities, {"implementation"})
+
     def test_bounded_codex_rejects_duplicate_or_bypassed_sandbox(self):
         base = {
             "command": "codex",
@@ -160,6 +214,7 @@ class ConfigAndRoutingTests(unittest.TestCase):
                     **base,
                     "args": [
                         "exec",
+                        "--ignore-user-config",
                         "--sandbox",
                         "read-only",
                         "--sandbox",
@@ -174,6 +229,7 @@ class ConfigAndRoutingTests(unittest.TestCase):
                     **base,
                     "args": [
                         "exec",
+                        "--ignore-user-config",
                         "--sandbox",
                         "read-only",
                         "--dangerously-bypass-approvals-and-sandbox",

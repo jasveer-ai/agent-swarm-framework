@@ -5,9 +5,9 @@ import signal
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
-from src.core.config import ProviderConfig
-from src.providers.base import ProviderError, TokenUsage
-from src.providers.cli import CLIProvider, parse_jsonl_output
+from agent_swarm.core.config import ProviderConfig
+from agent_swarm.providers.base import ProviderError, TokenUsage
+from agent_swarm.providers.cli import CLIProvider, parse_jsonl_output
 
 
 class ProviderParsingTests(unittest.TestCase):
@@ -115,6 +115,33 @@ class ProviderParsingTests(unittest.TestCase):
         self.assertNotIn("key-value", rendered)
         self.assertNotIn("password-value", rendered)
 
+    def test_nested_json_error_reports_the_actionable_message(self):
+        nested = json.dumps(
+            {
+                "type": "error",
+                "status": 400,
+                "error": {
+                    "type": "invalid_request_error",
+                    "message": "The configured model requires a newer CLI.",
+                },
+            }
+        )
+        raw = json.dumps({"type": "turn.failed", "error": {"message": nested}})
+
+        with self.assertRaisesRegex(ProviderError, "requires a newer CLI"):
+            parse_jsonl_output(raw)
+
+    def test_long_diagnostic_preserves_both_ends(self):
+        from agent_swarm.providers.base import redact_diagnostic
+
+        rendered = redact_diagnostic(
+            "actionable-start" + "x" * 200 + "useful-end", limit=80
+        )
+
+        self.assertIn("actionable-start", rendered)
+        self.assertIn("useful-end", rendered)
+        self.assertIn("<truncated>", rendered)
+
     def test_reasoning_parts_are_not_returned_as_agent_output(self):
         raw = json.dumps(
             {
@@ -160,7 +187,7 @@ class CLIProviderTests(unittest.IsolatedAsyncioTestCase):
         prompt = "$(touch /tmp/should-not-exist)"
 
         with patch(
-            "src.providers.cli.asyncio.create_subprocess_exec",
+            "agent_swarm.providers.cli.asyncio.create_subprocess_exec",
             new=AsyncMock(return_value=process),
         ) as create:
             result = await provider.run(
@@ -204,10 +231,10 @@ class CLIProviderTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch(
-                "src.providers.cli.asyncio.create_subprocess_exec",
+                "agent_swarm.providers.cli.asyncio.create_subprocess_exec",
                 new=AsyncMock(return_value=process),
             ),
-            patch("src.providers.cli.os.killpg") as kill_group,
+            patch("agent_swarm.providers.cli.os.killpg") as kill_group,
         ):
             task = asyncio.create_task(
                 provider.run("prompt", model="model", title="title", cwd=".")
@@ -237,7 +264,7 @@ class CLIProviderTests(unittest.IsolatedAsyncioTestCase):
         process.wait = AsyncMock(return_value=0)
         process.kill = Mock()
 
-        with patch("src.providers.cli.os.killpg") as kill_group:
+        with patch("agent_swarm.providers.cli.os.killpg") as kill_group:
             await CLIProvider._terminate_process_group(process)
 
         if os.name == "posix":
@@ -258,7 +285,7 @@ class CLIProviderTests(unittest.IsolatedAsyncioTestCase):
         process.kill = Mock()
 
         with patch(
-            "src.providers.cli.os.killpg",
+            "agent_swarm.providers.cli.os.killpg",
             side_effect=[None, PermissionError("group already terminated")],
         ):
             await CLIProvider._terminate_process_group(process)

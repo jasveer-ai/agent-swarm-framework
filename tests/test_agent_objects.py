@@ -3,14 +3,14 @@ import unittest
 from dataclasses import replace
 from typing import Any
 
-from src.agents.base import ObjectAgent, generation
-from src.agents.planner import PlanningAgent
-from src.agents.reviewer import ReviewerAgent
-from src.agents.worker import WorkerAgent
-from src.core.config import SwarmConfig
-from src.core.run import RunRecord, TaskSpec
-from src.core.runtime import AgentRuntime
-from src.providers.base import ProviderResult, TokenUsage
+from agent_swarm.agents.base import ObjectAgent, generation
+from agent_swarm.agents.planner import PlanningAgent
+from agent_swarm.agents.reviewer import ReviewerAgent
+from agent_swarm.agents.worker import WorkerAgent
+from agent_swarm.core.config import SwarmConfig
+from agent_swarm.core.run import RunRecord, TaskSpec
+from agent_swarm.core.runtime import AgentRuntime
+from agent_swarm.providers.base import ProviderResult, TokenUsage
 
 
 class ReturnTypes:
