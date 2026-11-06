@@ -646,6 +646,31 @@ class SwarmRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(provider.max_active, 1)
         self.assertTrue(all(task.review for task in result.record.tasks))
 
+    async def test_disjoint_workspace_writers_overlap_only_when_opted_in(self):
+        provider = ConcurrentProvider([outcome(), outcome(), review(), review()])
+        config = make_config(
+            verification={"enabled": False},
+            budgets={
+                "max_concurrency": 2, "max_provider_calls": 4,
+                "max_total_tokens": 10000, "provider_retry_limit": 0,
+                "allow_disjoint_workspace_writes": True,
+            },
+        )
+        plan = TaskPlan.from_data([
+            {"id": "a", "description": "Implement A", "complexity": "low",
+             "required_capabilities": ["implementation"], "access": "workspace_write",
+             "workspace_paths": ["Sources/A"]},
+            {"id": "b", "description": "Implement B", "complexity": "low",
+             "required_capabilities": ["implementation"], "access": "workspace_write",
+             "workspace_paths": ["Sources/B"]},
+        ])
+        result = await SwarmRunner(config, providers=provider_map(provider)).run(
+            "Implement both", cwd=".", plan=plan,
+        )
+        self.assertEqual(result.record.status, "succeeded")
+        self.assertEqual(provider.max_active, 2)
+        self.assertTrue(all(task.review for task in result.record.tasks))
+
     async def test_low_complexity_workspace_write_is_still_reviewed(self):
         provider = ScriptedProvider([outcome(), review()])
         plan = TaskPlan.from_data(

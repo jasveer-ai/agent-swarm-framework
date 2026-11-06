@@ -64,8 +64,9 @@ The deterministic `SwarmRunner` owns orchestration:
 4. Select the lowest `cost_rank` among the eligible profiles.
 5. Instantiate a fresh `WorkerAgent` per task for isolated state and usage
    attribution.
-6. Run read-only tasks concurrently, while serializing writers and their reviews
-   against one checkout; block downstream tasks when a dependency fails.
+6. Run read-only tasks concurrently. By default serialize writers and their
+   reviews against one checkout; explicit disjoint ownership can opt into parallel
+   writes. Block downstream tasks when a dependency fails.
 7. Route configured task complexities and every workspace-write result through
    a typed, fail-closed `ReviewerAgent`.
 8. Return task records, routing choices, provider attempts, normalized usage,
@@ -358,9 +359,15 @@ start several unexpectedly expensive calls before the first usage report lands.
 
 Read-only providers may retry transient failures and malformed typed responses
 within the configured limits. Workspace writers never retry provider failures,
-must set `validation_retries: 0`, and are serialized per real checkout path
-across concurrent runs in the same Python event loop to avoid repeating or
-overlapping mutations. Autonomous provider-backed planning acquires the same
+must set `validation_retries: 0`, and by default are serialized per real checkout
+path across concurrent runs in the same Python event loop. Setting
+`budgets.allow_disjoint_workspace_writes: true` allows caller-supplied tasks with
+nonempty `workspace_paths` to overlap only when their declared file or directory
+paths do not overlap. Paths must be literal checkout-relative paths; parent and
+child directories conflict. Unscoped tasks and the default configuration retain
+checkout-wide exclusion. The reservation covers both implementation and review.
+Providers must enforce their declared ownership separately: these scheduling
+leases are not a filesystem sandbox or a semantic dependency check. Autonomous provider-backed planning acquires the same
 checkout's read lease. Every successful workspace write is reviewed even when
 optional read-only verification is disabled. Separate framework processes still
 require external worktree or lock isolation.

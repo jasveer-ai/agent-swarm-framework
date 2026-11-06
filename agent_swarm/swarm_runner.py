@@ -355,7 +355,10 @@ class SwarmRunner:
         workspace_gate: WorkspaceGate,
         plan_message_id: str,
     ) -> TaskRecord:
-        async with workspace_gate.hold(task.access):
+        async with workspace_gate.hold(
+            task.access, workspace_paths=task.workspace_paths,
+            allow_disjoint_writes=self.config.budgets.allow_disjoint_workspace_writes,
+        ):
             return await self._execute_task(
                 task,
                 goal=goal,

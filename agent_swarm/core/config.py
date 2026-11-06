@@ -228,15 +228,20 @@ class BudgetConfig:
     max_provider_calls: int = 20
     max_total_tokens: int = 250_000
     max_estimated_cost_usd: float = 0.0
+    allow_disjoint_workspace_writes: bool = False
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "BudgetConfig":
+        scoped_writes = data.get("allow_disjoint_workspace_writes", False)
+        if not isinstance(scoped_writes, bool):
+            raise ConfigurationError("allow_disjoint_workspace_writes must be boolean")
         values = cls(
             max_concurrency=int(data.get("max_concurrency", 1)),
             provider_retry_limit=int(data.get("provider_retry_limit", 1)),
             max_provider_calls=int(data.get("max_provider_calls", 20)),
             max_total_tokens=int(data.get("max_total_tokens", 250_000)),
             max_estimated_cost_usd=float(data.get("max_estimated_cost_usd", 0.0)),
+            allow_disjoint_workspace_writes=scoped_writes,
         )
         if (
             min(

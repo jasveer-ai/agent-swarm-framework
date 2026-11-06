@@ -8,6 +8,8 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .concurrency import normalize_workspace_paths
+
 
 class TaskSpec(BaseModel):
     """Typed task contract shared by the overseer and workers."""
@@ -24,6 +26,12 @@ class TaskSpec(BaseModel):
     estimated_input_tokens: int = Field(default=0, ge=0)
     max_output_tokens: int = Field(default=0, ge=0)
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    workspace_paths: Tuple[str, ...] = ()
+
+    @field_validator("workspace_paths")
+    @classmethod
+    def valid_workspace_paths(cls, value: Tuple[str, ...]) -> Tuple[str, ...]:
+        return normalize_workspace_paths(value)
 
     @field_validator("task_id", "description")
     @classmethod

@@ -64,7 +64,7 @@ overseer:
   identity: Codex Overseer
   role: overseer
   provider: codex_readonly
-  model: gpt-5.6-sol
+  model: gpt-5.6-terra
   capabilities: [planning]
   strategy: predict
   access: read_only
@@ -106,7 +106,7 @@ workers:
     identity: Codex High-Assurance Analyst
     role: worker
     provider: codex_readonly
-    model: gpt-5.6-sol
+    model: gpt-5.6-terra
     capabilities: [analysis]
     strategy: agentic
     access: read_only
@@ -145,7 +145,7 @@ workers:
     identity: Codex High-Assurance Builder
     role: worker
     provider: codex_workspace
-    model: gpt-5.6-sol
+    model: gpt-5.6-terra
     capabilities: [analysis, documentation, implementation, testing]
     strategy: agentic
     access: workspace_write
@@ -158,7 +158,7 @@ workers:
     identity: Codex Reviewer
     role: reviewer
     provider: codex_readonly
-    model: gpt-5.6-sol
+    model: gpt-5.6-terra
     capabilities: [review]
     strategy: predict
     access: read_only
